@@ -1,0 +1,80 @@
+name: Build KernelSU For OnePlus6(enchilada)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  KernelSU-For-Enchilada:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Installing Dependencies
+        run: |
+          sudo apt update -y
+          sudo apt-get install git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python2 python3
+          sudo apt clean
+      
+      - name: Setup Configuration
+        run: |
+          echo "BUILD_TIME=$(TZ=Asia/Shanghai date "+%Y%m%d%H%M")" >> $GITHUB_ENV
+          for s in $(cat config.env);do echo $s >> $GITHUB_ENV;done
+    
+      - name: Cloning Sources and Toolchain
+        run: |
+          git clone ${{env.KERNEL_SOURCE}} --depth=1 -b ${{env.KERNEL_SOURCE_BRANCH}} android_kernel_oneplus_sdm845
+          git clone https://gitlab.com/crdroidandroid/android_prebuilts_clang_host_linux-x86_clang-r445002 --depth=1 --single-branch --no-tags -b 12.0 ~/toolchains/clang
+          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android-10.0.0_r47 --depth=1 --single-branch --no-tags ~/toolchains/aarch64-linux-android-4.9
+          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9 -b android-10.0.0_r47 --depth=1 --single-branch --no-tags ~/toolchains/arm-linux-androideabi-4.9
+        
+      - name: Compiling Kernel
+        run: |
+          CLANG=~/toolchains/clang/bin
+          GCC32=~/toolchains/arm-linux-androideabi-4.9/bin
+          GCC64=~/toolchains/aarch64-linux-android-4.9/bin
+          PATH=$CLANG:$GCC64:$GCC32:$PATH
+          export PATH
+          export ARCH=arm64
+          export CLANG_TRIPLE=aarch64-linux-gnu
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          output_dir=out
+          pushd android_kernel_oneplus_sdm845
+          echo "CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y
+          CONFIG_SECURITY_SELINUX_DEVELOP=y
+          CONFIG_SAMPLE_KPROBES=y
+          CONFIG_SAMPLE_KRETPROBES=y" >> arch/arm64/configs/${{env.KERNEL_DEFCONFIG}}
+          sudo cp -r ../Tools/file security/selinux/hooks.c
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s ${{env.KERNELSU_TAG}}
+          make O="$output_dir" ${{env.KERNEL_DEFCONFIG}}
+          make -j $(nproc) O="$output_dir" CC="ccache clang"
+          popd
+          tar -zcvf toolchains.tar.gz ~/toolchains
+          tar -zcvf kernelsu_source.tar.gz android_kernel_oneplus_sdm845
+          
+      - name: Resource organization
+        run: |
+          sudo mv android_kernel_oneplus_sdm845/out/arch/arm64/boot/Image.gz-dtb anykernel/
+          cd anykernel/
+          sed -i 's/crdroid-13.0/${{env.ROM_NAME}}/g' anykernel.sh
+
+      - name: Upload AnyKernel3
+        uses: actions/upload-artifact@v3
+        with:
+          name: AnyKernel3_enchilada-${{ env.ROM_NAME }}-${{ env.BUILD_TIME }}
+          path: anykernel/*
+
+      # - name: Upload Toolchains
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: toolchains
+      #     path: toolchains.tar.gz
+
+      # - name: Upload kernel_source
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: kernelsu_source
+      #     path: kernelsu_source.tar.gz
+
+        
